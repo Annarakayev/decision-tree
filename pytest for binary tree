@@ -1,0 +1,157 @@
+import pytest
+from solfinal import TITANIC_DT, DTNode, DTLeaf
+
+def test_root_node_is_correct():
+    assert isinstance(TITANIC_DT, DTNode)
+    assert TITANIC_DT.featurename == 'sex'
+    assert TITANIC_DT.threshold == 0
+
+def test_main_branches():
+    left = TITANIC_DT.left
+    assert isinstance(left, DTNode)
+    assert left.featurename == 'class'
+    assert left.threshold == 1
+
+    right = TITANIC_DT.right
+    assert isinstance(right, DTNode)
+    assert right.featurename == 'class'
+    assert right.threshold == 2
+
+def test_subnodes():
+    assert TITANIC_DT.left.left.featurename == 'age'
+    assert TITANIC_DT.left.left.threshold == 21
+
+    assert TITANIC_DT.right.right.featurename == 'fare'
+    assert TITANIC_DT.right.right.threshold == 12
+
+def test_all_leaf():
+    leaves = [
+        TITANIC_DT.left.left.left.value,
+        TITANIC_DT.left.left.right.value,
+        TITANIC_DT.left.right.value,
+        TITANIC_DT.right.left.value,
+        TITANIC_DT.right.right.left.value,
+        TITANIC_DT.right.right.right.value
+    ]
+    assert set(leaves) == {0.14, 0.38, 0.42, 0.57, 0.59, 0.95}
+
+
+def test_copy_creates_new_object():
+    tree_copy = TITANIC_DT.copy()
+    assert tree_copy is not TITANIC_DT
+    assert repr(tree_copy) == repr(TITANIC_DT)
+
+def test_copy_subnodes_are_different_objects():
+    tree_copy = TITANIC_DT.copy()
+    assert tree_copy.left is not TITANIC_DT.left
+    assert tree_copy.right is not TITANIC_DT.right
+
+def test_copy_does_not_change_original():
+    tree_copy = TITANIC_DT.copy()
+    tree_copy.left.featurename = 'modified'
+    assert TITANIC_DT.left.featurename == 'class'
+
+
+def test_leaf_height_is_zero():
+    assert DTLeaf(0.5).height() == 0
+
+def test_tree_height():
+    assert TITANIC_DT.height() == 3
+
+
+def test_predict_for_male_class2():
+    x = {'sex': 0, 'class': 2, 'age': 30, 'fare': 20}
+    assert TITANIC_DT.predict(x) == 0.14
+
+def test_predict_for_male_class1_age10():
+    x = {'sex': 0, 'class': 1, 'age': 30, 'fare': 20}
+    assert TITANIC_DT.predict(x) == 0.38
+
+def test_predict_for_male_class1_age10():
+    x = {'sex': 0, 'class': 1, 'age': 10, 'fare': 20}
+    assert TITANIC_DT.predict(x) == 0.57
+
+def test_predict_for_female_class3_highfare():
+    x = {'sex': 1, 'class': 3, 'age': 20, 'fare': 50}
+    assert TITANIC_DT.predict(x) == 0.42
+
+def test_predict_for_female_class3_lowfare():
+    x = {'sex': 1, 'class': 3, 'age': 20, 'fare': 10}
+    assert TITANIC_DT.predict(x) == 0.59
+
+def test_predict_for_female_class1():
+    x = {'sex': 1, 'class': 1, 'age': 30, 'fare': 100}
+    assert TITANIC_DT.predict(x) == 0.95
+
+
+def test_explain_left_path(capsys):
+    x = {'sex': 0, 'class': 1, 'age': 10, 'fare': 20}
+    TITANIC_DT.explain(x)
+    captured = capsys.readouterr()
+    assert "sex" in captured.out
+    assert "class" in captured.out
+    assert "age" in captured.out
+    assert "Reached leaf value:" in captured.out
+    assert "0.57" in captured.out
+
+def test_explain_right_path(capsys):
+    x = {'sex': 1, 'class': 3, 'age': 30, 'fare': 50}
+    TITANIC_DT.explain(x)
+    captured = capsys.readouterr()
+    assert "sex" in captured.out
+    assert "class" in captured.out
+    assert "fare" in captured.out
+    assert "Reached leaf value:" in captured.out
+    assert "0.42" in captured.out
+
+def test_explain_extreme_values(capsys):
+    x = {'sex': 1, 'class': 3, 'age': 200, 'fare': 0}
+    TITANIC_DT.explain(x)
+    captured = capsys.readouterr()
+    assert "Reached leaf value:" in captured.out
+
+
+def test_predict_multi_empty():
+    assert TITANIC_DT.predict_multi([]) == []
+
+def test_predict_multi_small_list():
+    X = [{'sex': 0, 'class': 1, 'age': 10, 'fare': 10} for _ in range(10)]
+    result = TITANIC_DT.predict_multi(X)
+    expected = [TITANIC_DT.predict(x) for x in X]
+    assert result == expected
+
+def test_predict_multi_large_list():
+    X = [{'sex': 1, 'class': 3, 'age': 30, 'fare': 30} for _ in range(1000)]
+    result = TITANIC_DT.predict_multi(X)
+    assert len(result) == len(X)
+    assert all(r == 0.42 for r in result)
+
+def test_predict_multi_order():
+    X = [
+        {'sex': 0, 'class': 1, 'age': 10, 'fare': 10},
+        {'sex': 0, 'class': 1, 'age': 30, 'fare': 20},
+        {'sex': 1, 'class': 3, 'age': 30, 'fare': 20},
+    ]
+    result = TITANIC_DT.predict_multi(X)
+    assert result == [0.57, 0.38, 0.42]
+
+
+import pandas as pd
+from solfinal import read_titanic
+
+def test_read_titanic_valid_file(tmp_path):
+    file = tmp_path / "titanic.csv"
+    file.write_text("name,age,sex\n") 
+    df = read_titanic(file)
+    assert isinstance(df, pd.DataFrame)
+
+def test_read_titanic_file_not_found():
+    with pytest.raises(FileNotFoundError):
+        read_titanic("nonexistent.csv")
+
+
+def test_read_titanic_empty_file(tmp_path):
+    file = tmp_path / "empty.csv"
+    file.write_text("")
+    with pytest.raises(pd.errors.EmptyDataError):
+        read_titanic(file)

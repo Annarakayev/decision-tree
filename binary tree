@@ -1,0 +1,89 @@
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+import pandas as pd
+print(pd.__version__)
+
+class DTLeaf:
+    """Decision Tree (terminal) leaf node"""
+    def __init__(self, value=None):
+        self.value = value
+
+    def __repr__(self):
+        return f"DTLeaf({self.value})"
+    
+    def copy(self):
+        return DTLeaf(self.value)
+    
+    def height(self):
+        return 0
+    
+    def predict(self,x):
+        return self.value
+    
+    def explain(self,x):
+        print(f"Reached leaf value: {self.value}")
+
+
+class DTNode:
+    """Internal decision tree node with binary split.
+    When feature <= threshold go to the left subtree,
+    when feature > threshold go to the right subtree."""
+    def __init__(self, featurename, threshold, left, right):
+        self.featurename = featurename
+        self.threshold = threshold
+        self.left = left
+        self.right = right
+    
+    def __repr__(self):
+        return f"DTNode({repr(self.featurename)}, {repr(self.threshold)}, {self.left}, {self.right})"
+
+    def copy(self):
+        return DTNode(self.featurename, self.threshold, self.left.copy(), self.right.copy())
+
+    def height(self):
+        return 1 + max(self.left.height(), self.right.height())
+    
+    def predict(self,x):
+        feature_value = x[self.featurename]
+        if feature_value <= self.threshold:
+            return self.left.predict(x)
+        else:
+            return self.right.predict(x)
+        
+    def explain(self,x):
+        feature_value = x[self.featurename]
+        if feature_value <= self.threshold:
+            print(f"{self.featurename} ({feature_value}) <= {self.threshold} -> True -> go left")
+            self.left.explain(x)
+        else:
+            print(f"{self.featurename} ({feature_value}) > {self.threshold} -> False -> go right")
+            self.right.explain(x)
+        
+    def predict_multi(self, X):
+        n = len(X)
+        if n < 500:
+            return [self.predict(x) for x in X]
+        
+        with ThreadPoolExecutor() as executor:
+            results = list(executor.map(self.predict, X))
+        return results
+    
+    def read_titanic(filename):
+        return pd.read_csv(filename)
+    
+
+TITANIC_DT = DTNode(
+    'sex', 0, 
+    DTNode('class', 1,
+            DTNode('age', 21, DTLeaf(0.57), DTLeaf(0.38)),
+            DTLeaf(0.14)),
+    DTNode('class', 2,
+            DTLeaf(0.95),
+            DTNode('fare', 12, DTLeaf(0.59), DTLeaf(0.42)))
+)
+print(TITANIC_DT)
+
+
+#test
+x = {'sex': 0, 'class': 1, 'age': 20, 'fare': 20}
+print(TITANIC_DT.predict(x))
+print(TITANIC_DT.explain(x))
