@@ -1,9 +1,10 @@
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 import pandas as pd
 print(pd.__version__)
 
 class DTLeaf:
     """Decision Tree (terminal) leaf node"""
+
     def __init__(self, value=None):
         self.value = value
 
@@ -22,11 +23,19 @@ class DTLeaf:
     def explain(self,x):
         print(f"Reached leaf value: {self.value}")
 
+    def fit(self,dataset):
+        if not dataset:
+            return
+        survivors = sum(1 for _, y in dataset if y)
+        self.value = survivors/ len(dataset)
+    
+    
 
 class DTNode:
     """Internal decision tree node with binary split.
     When feature <= threshold go to the left subtree,
     when feature > threshold go to the right subtree."""
+
     def __init__(self, featurename, threshold, left, right):
         self.featurename = featurename
         self.threshold = threshold
@@ -43,14 +52,20 @@ class DTNode:
         return 1 + max(self.left.height(), self.right.height())
     
     def predict(self,x):
-        feature_value = x[self.featurename]
+        feature_value = x.get(self.featurename)
+        if feature_value is None:
+            raise KeyError(f"Feature '{self.featurename}' missing in input")
+        
         if feature_value <= self.threshold:
             return self.left.predict(x)
         else:
             return self.right.predict(x)
         
     def explain(self,x):
-        feature_value = x[self.featurename]
+        feature_value = x.get(self.featurename)
+        if feature_value is None:
+            raise KeyError(f"Feature '{self.featurename}' missing in input")
+        
         if feature_value <= self.threshold:
             print(f"{self.featurename} ({feature_value}) <= {self.threshold} -> True -> go left")
             self.left.explain(x)
@@ -58,18 +73,63 @@ class DTNode:
             print(f"{self.featurename} ({feature_value}) > {self.threshold} -> False -> go right")
             self.right.explain(x)
         
-    def predict_multi(self, X):
-        n = len(X)
-        if n < 500:
-            return [self.predict(x) for x in X]
-        
-        with ThreadPoolExecutor() as executor:
-            results = list(executor.map(self.predict, X))
+    def predict_multi(self, X, parallel = False):
+        if not X:
+            return []
+        if parallel:
+            with ProcessPoolExecutor() as executor:
+                results = list(executor.map(self.predict, X))
+        else:
+            results = [self.predict(x) for x in X]
         return results
     
-    def read_titanic(filename):
-        return pd.read_csv(filename)
+    def fit(self, dataset):
+        left_data = []
+        right_data = []
+        for x,y in dataset:
+            if x[self.featurename] <= self.threshold:
+                left_data.append((x,y))
+            else:
+                right_data.append((x,y))
+
+        self.left.fit(left_data)
+        self.right.fit(right_data)
     
+#question 2.7
+def read_titanic(filename):
+    df =  pd.read_csv(filename)
+    df = df.rename(columns={'Sex': 'sex', 'Pclass': 'class', 'Age': 'age', 'Fare': 'fare'})
+    df['sex'] = df['sex'].apply(lambda x: 0 if str(x).lower() == 'male' else 1)
+    df = df.dropna(subset=['sex', 'class', 'age', 'fare'])
+    return df
+
+
+#question 2.8
+def add_predictions(df,dtree):
+    df_copy = df.copy()
+    df_copy['predsurvived'] = df_copy.apply(
+        lambda row: dtree.predict(row.to_dict()) > 0.5,
+        axis = 1
+    )
+    return df_copy
+
+#question 2.9
+def confusion(df):
+    if 'Survived' not in df.columns or 'predsurvived' not in df.columns:
+        raise ValueError("DataFrame must contain 'Survived' and 'predsurvived' columns")
+
+    TP = ((df['Survived'] == 1) & (df['predsurvived'] == True)).sum()
+    TN = ((df['Survived'] == 0) & (df['predsurvived'] == False)).sum()
+    FP = ((df['Survived'] == 0) & (df['predsurvived'] == True)).sum()
+    FN = ((df['Survived'] == 1) & (df['predsurvived'] == False)).sum()
+
+    print("Confusion Matrix:")
+    print("            Predicted")
+    print("            0      1")
+    print(f"Actual 0    {TN:<6} {FP:<6}")
+    print(f"Actual 1    {FN:<6} {TP:<6}")
+
+
 
 TITANIC_DT = DTNode(
     'sex', 0, 
@@ -82,8 +142,80 @@ TITANIC_DT = DTNode(
 )
 print(TITANIC_DT)
 
+#question 2.11
+import random
+from statistics import mean
+
+def build_stump(dataset):
+    if not dataset:
+        return DTLeaf(0.5)
+
+    feature_names = list(dataset[0][0].keys())
+    feature = random.choice(feature_names)
+
+    values = sorted(x[feature] for x, _ in dataset)
+    threshold = values[len(values) // 2]
+
+    left_data = [(x, y) for x, y in dataset if x[feature] <= threshold]
+    right_data = [(x, y) for x, y in dataset if x[feature] > threshold]
+
+    if not left_data or not right_data:
+        avg_value = mean(y for _, y in dataset)
+        return DTLeaf(avg_value)
+    
+    left_value = mean(y for _, y in left_data) if left_data else 0.5
+    right_value = mean(y for _, y in right_data) if right_data else 0.5
+
+    return DTNode(feature, threshold, DTLeaf(left_value), DTLeaf(right_value))
+
+
+def build_tree(dataset, height):
+    if height <= 0 or not dataset:
+        avg_value = mean(y for _, y in dataset) if dataset else 0.5
+        return DTLeaf(avg_value)
+
+    feature_names = list(dataset[0][0].keys())
+    feature = random.choice(feature_names)
+
+    values = sorted(x[feature] for x, _ in dataset)
+    threshold = values[len(values)//2]
+
+    left_data = [(x, y) for x, y in dataset if x[feature] <= threshold]
+    right_data = [(x, y) for x, y in dataset if x[feature] > threshold]
+
+    if not left_data or not right_data:
+        avg_value = mean(y for _, y in dataset)
+        return DTLeaf(avg_value)
+    
+    left_subtree = build_tree(left_data, height-1)
+    right_subtree = build_tree(right_data, height-1)
+
+    return DTNode(feature, threshold, left_subtree, right_subtree)
+
 
 #test
-x = {'sex': 0, 'class': 1, 'age': 20, 'fare': 20}
-print(TITANIC_DT.predict(x))
-print(TITANIC_DT.explain(x))
+if __name__ == "__main__":
+    x = {'sex': 0, 'class': 1, 'age': 20, 'fare': 20}
+    print("Prediction:", TITANIC_DT.predict(x))
+    TITANIC_DT.explain(x)
+
+    passengers = [
+        {'sex': 0, 'class': 1, 'age': 20, 'fare': 20},
+        {'sex': 1, 'class': 3, 'age': 35, 'fare': 8}
+    ]
+    print("Batch predictions:", TITANIC_DT.predict_multi(passengers))
+
+    df = read_titanic("titanic.csv")
+    df_new = add_predictions(df, TITANIC_DT)
+    print(df_new.head())
+    confusion(df_new)
+
+
+    dataset = [
+    ({'sex': 0, 'class': 1, 'age': 20, 'fare': 50}, True),
+    ({'sex': 1, 'class': 3, 'age': 35, 'fare': 8}, False),
+    ({'sex': 0, 'class': 2, 'age': 25, 'fare': 15}, True)
+    ]
+    TITANIC_DT.fit(dataset)
+    print(TITANIC_DT.left.left.left.value)
+
