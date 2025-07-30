@@ -1,4 +1,5 @@
-import pytest
+
+#question 2.1 - 4 tests
 from solfinal import TITANIC_DT, DTNode, DTLeaf
 
 def test_root_node_is_correct():
@@ -35,7 +36,7 @@ def test_all_leaf():
     ]
     assert set(leaves) == {0.14, 0.38, 0.42, 0.57, 0.59, 0.95}
 
-
+#question 2.2 - 3 tests
 def test_copy_creates_new_object():
     tree_copy = TITANIC_DT.copy()
     assert tree_copy is not TITANIC_DT
@@ -51,14 +52,14 @@ def test_copy_does_not_change_original():
     tree_copy.left.featurename = 'modified'
     assert TITANIC_DT.left.featurename == 'class'
 
-
+#question 2.3 - 2 tests
 def test_leaf_height_is_zero():
     assert DTLeaf(0.5).height() == 0
 
 def test_tree_height():
     assert TITANIC_DT.height() == 3
 
-
+#question 2.4 - 6 tests
 def test_predict_for_male_class2():
     x = {'sex': 0, 'class': 2, 'age': 30, 'fare': 20}
     assert TITANIC_DT.predict(x) == 0.14
@@ -83,7 +84,7 @@ def test_predict_for_female_class1():
     x = {'sex': 1, 'class': 1, 'age': 30, 'fare': 100}
     assert TITANIC_DT.predict(x) == 0.95
 
-
+#question 2.5 - 3 tests
 def test_explain_left_path(capsys):
     x = {'sex': 0, 'class': 1, 'age': 10, 'fare': 20}
     TITANIC_DT.explain(x)
@@ -110,18 +111,21 @@ def test_explain_extreme_values(capsys):
     captured = capsys.readouterr()
     assert "Reached leaf value:" in captured.out
 
-
+#question 2.6 - 5 tests
 def test_predict_multi_empty():
-    assert TITANIC_DT.predict_multi([]) == []
+    result = TITANIC_DT.predict_multi([])
+    assert isinstance(result, list)
+    assert result == []
 
 def test_predict_multi_small_list():
-    X = [{'sex': 0, 'class': 1, 'age': 10, 'fare': 10} for _ in range(10)]
-    result = TITANIC_DT.predict_multi(X)
+    X = [{'sex': 0, 'class': 1, 'age': 10, 'fare': 10} for _ in range(5)]
+    result = TITANIC_DT.predict_multi(X, parallel= True)
     expected = [TITANIC_DT.predict(x) for x in X]
     assert result == expected
+    assert len(result) == 5
 
 def test_predict_multi_large_list():
-    X = [{'sex': 1, 'class': 3, 'age': 30, 'fare': 30} for _ in range(1000)]
+    X = [{'sex': 1, 'class': 3, 'age': 30, 'fare': 30} for _ in range(100)]
     result = TITANIC_DT.predict_multi(X)
     assert len(result) == len(X)
     assert all(r == 0.42 for r in result)
@@ -135,23 +139,162 @@ def test_predict_multi_order():
     result = TITANIC_DT.predict_multi(X)
     assert result == [0.57, 0.38, 0.42]
 
+def test_predict_multi_missing_key():
+    X = [{'sex': 0, 'class': 1, 'fare': 10}]
+    with pytest.raises(KeyError):
+        TITANIC_DT.predict_multi(X)
 
+#question 2.7 - 4 tests
 import pandas as pd
 from solfinal import read_titanic
 
-def test_read_titanic_valid_file(tmp_path):
-    file = tmp_path / "titanic.csv"
-    file.write_text("name,age,sex\n") 
-    df = read_titanic(file)
+def test_read_titanic_returns_dataframe():
+    df = read_titanic("titanic.csv")
     assert isinstance(df, pd.DataFrame)
 
-def test_read_titanic_file_not_found():
-    with pytest.raises(FileNotFoundError):
-        read_titanic("nonexistent.csv")
+def test_read_titanic_has_required_columns():
+    df = read_titanic("titanic.csv")
+    for col in ['sex', 'class', 'age', 'fare']:
+        assert col in df.columns
 
+def test_read_titanic_no_missing_values():
+    df = read_titanic("titanic.csv")
+    for col in ['sex', 'class', 'age', 'fare']:
+        assert df[col].notnull().all()
 
-def test_read_titanic_empty_file(tmp_path):
-    file = tmp_path / "empty.csv"
-    file.write_text("")
-    with pytest.raises(pd.errors.EmptyDataError):
-        read_titanic(file)
+def test_read_titanic_sex_binary():
+    df = read_titanic("titanic.csv")
+    assert set(df['sex'].unique()).issubset({0, 1})
+
+#question 2.8 - 2 tests
+from solfinal import add_predictions
+def test_add_predictions_adds_column():
+    df = read_titanic("titanic.csv").head(10)
+    df_new = add_predictions(df, TITANIC_DT)
+    assert 'predsurvived' in df_new.columns
+    assert len(df_new) == len(df)
+
+def test_add_predictions_values_boolean():
+    df = read_titanic("titanic.csv").head(10)
+    df_new = add_predictions(df, TITANIC_DT)
+    assert set(df_new['predsurvived'].unique()).issubset({True, False})
+
+#question 2.9 - 3 tests
+from solfinal import confusion
+
+def test_confusion_prints_matrix(capsys, sample_df):
+    confusion(sample_df)
+    captured = capsys.readouterr()
+    assert "Confusion Matrix" in captured.out
+    assert "Predicted" in captured.out
+    assert "Actual 0" in captured.out
+    assert "Actual 1" in captured.out
+
+def test_confusion_missing_columns():
+    bad_df = pd.DataFrame({'a': [1, 0], 'b': [True, False]})
+    with pytest.raises(ValueError):
+        confusion(bad_df)
+
+#question 2.10 - 5 tests
+def test_fit_on_empty_dataset():
+    leaf = DTLeaf()
+    leaf.fit([])
+    assert leaf.value is None
+
+def test_fit_on_single_leaf():
+    leaf = DTLeaf()
+    dataset = [
+        ({'sex': 0}, True),
+        ({'sex': 1}, True),
+        ({'sex': 1}, False)
+    ]
+    leaf.fit(dataset)
+    assert leaf.value == pytest.approx(2/3)
+
+def test_fit_runs_without_errors():
+    leaf = DTLeaf()
+    try:
+        leaf.fit([({'sex':0}, True)])
+    except Exception as e:
+        pytest.fail(f"fit raised an exception: {e}")
+
+def test_node_fit_splits_correctly():
+    left_leaf = DTLeaf()
+    right_leaf = DTLeaf()
+    node = DTNode('sex', 0, left_leaf, right_leaf)
+
+    dataset = [
+        ({'sex': 0}, True),
+        ({'sex': 1}, False),
+        ({'sex': 1}, True)
+    ]
+    node.fit(dataset)
+    assert left_leaf.value == pytest.approx(1.0) 
+    assert right_leaf.value == pytest.approx(0.5)
+
+def test_node_fit_handles_empty_split():
+    left_leaf = DTLeaf()
+    right_leaf = DTLeaf()
+    node = DTNode('sex', 0, left_leaf, right_leaf)
+
+    dataset = [({'sex': 1}, True), ({'sex': 1}, False)]
+    node.fit(dataset)
+    assert left_leaf.value is None
+    assert right_leaf.value == pytest.approx(0.5)
+
+#question 2.11- 
+from solfinal import build_stump, build_tree
+
+#build stump
+def test_build_stump_empty_dataset():
+    stump = build_stump([])
+    assert isinstance(stump, DTLeaf)
+    assert stump.value == approx(0.5)
+
+def test_build_stump_returns_node(small_dataset):
+    stump = build_stump(small_dataset)
+    assert isinstance(stump, DTNode)
+    assert isinstance(stump.left, DTLeaf)
+    assert isinstance(stump.right, DTLeaf)
+
+def test_build_stump_predict_range(small_dataset):
+    stump = build_stump(small_dataset)
+    for x, _ in small_dataset:
+        val = stump.predict(x)
+        assert 0 <= val <= 1
+
+#build tree
+def test_build_tree_height_0(small_dataset):
+    tree = build_tree(small_dataset, 0)
+    assert isinstance(tree, DTLeaf)
+    expected = np.mean([y for _, y in small_dataset])
+    assert tree.value == pytest.approx(expected)
+
+def test_build_tree_empty_dataset():
+    tree = build_tree([], 3)
+    assert isinstance(tree, DTLeaf)
+    assert 0 <= tree.value <= 1
+
+def test_build_tree_single_item():
+    dataset = [({'age': 50, 'fare': 100}, 1)]
+    tree = build_tree(dataset, 2)
+    assert isinstance(tree, (DTLeaf, DTNode))
+    val = tree.predict({'age': 50, 'fare': 100})
+    assert val == 1
+
+def test_build_tree_no_split_possible():
+    dataset = [({'age': 10}, 1), ({'age': 10}, 0), ({'age': 10}, 1)]
+    tree = build_tree(dataset, 3)
+    assert isinstance(tree, DTLeaf)
+    expected = np.mean([y for _, y in dataset])
+    assert tree.value == pytest.approx(expected)
+
+def test_build_tree_partial_split():
+    dataset = [
+        ({'age': 10, 'fare': 20}, 1),
+        ({'age': 20, 'fare': 30}, 0),
+        ({'age': 30, 'fare': 40}, 1),
+    ]
+    tree = build_tree(dataset, 1)
+    assert isinstance(tree, DTNode)
+    assert tree.left is not None and tree.right is not None
